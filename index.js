@@ -173,7 +173,8 @@ function readClientHello(buf, length) {
 	var sessionIdLength = buf[0];
 	var session_id;
 	if (sessionIdLength) {
-		assert(false); //not implemented
+		console.log('sessionIdLength: ' + sessionIdLength);
+		// assert(false); //not implemented
 	}
 	buf = buf.slice(1 + sessionIdLength);
 
@@ -719,7 +720,7 @@ CipherSuites.TLS_DHE_RSA_WITH_CHACHA20_POLY1305_SHA256 = [0xcc, 0x15];
 // "AES128-GCM-SHA256",
 
 var supportedCipherSuites = [
-	// CipherSuites.TLS_RSA_WITH_NULL_SHA,
+	CipherSuites.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,//Firefox
 	//
 	// CipherSuites.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, //'ECDHE-ECDSA-AES128-GCM-SHA256',
 	// CipherSuites.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384, //'ECDHE-RSA-AES256-GCM-SHA384',
@@ -745,6 +746,7 @@ var supportedCipherSuites = [
 	// CipherSuites.TLS_RSA_WITH_AES_256_GCM_SHA384, // 'AES256-GCM-SHA384',
 	CipherSuites.TLS_ECDHE_RSA_WITH_RC4_128_SHA, // 'ECDHE-RSA-RC4-SHA',
 	CipherSuites.TLS_ECDHE_ECDSA_WITH_RC4_128_SHA, // 'ECDHE-ECDSA-RC4-SHA',
+
 ];
 
 
