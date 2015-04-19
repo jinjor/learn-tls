@@ -354,7 +354,7 @@ function sendCertificate(c, context) {
 	var certificate = createCertificate(c, context);
 	var handshake = createHandshake(11, certificate);
 	var record = createRecord(22, handshake);
-	console.log(record);
+	console.log('sendCertificate: ', record);
 	c.write(recordToBuffer(record));
 }
 
@@ -382,6 +382,17 @@ function sendServerHelloDone(c, context) {
 	c.write(recordToBuffer(record));
 }
 
+function decodePem(pemBuf) {
+	var pemStr = pemBuf.toString();
+	console.log(pemStr);
+	var content = pemStr.split('-----BEGIN CERTIFICATE-----')[1]
+		.split('-----END CERTIFICATE-----')[0]
+		.split('\r').join()
+		.split('\n').join();
+	var decorded = new Buffer(content, 'base64');
+	return decorded;
+}
+
 
 // opaque ASN.1Cert<1..2^24-1>;
 
@@ -390,7 +401,7 @@ function sendServerHelloDone(c, context) {
 // } Certificate;
 function createCertificate(c, context) {
 	var certificate_list = [];
-	certificate_list.push(context.cert);
+	certificate_list.push(decodePem(context.cert));
 	return {
 		'ASN.1Cert': certificate_list,
 		_length: certificate_list.reduce(function(memo, cert) {
