@@ -3,6 +3,11 @@ var fs = require('fs');
 var assert = require('assert');
 
 var b = {
+	uint8: function(num) {
+		var buf = new Buffer(1);
+		buf.writeUInt8(num);
+		return buf;
+	},
 	uint16: function(num) {
 		var buf = new Buffer(2);
 		buf.writeUInt16BE(num);
@@ -31,8 +36,8 @@ function assertEquals(a, b) {
 var server = net.createServer(function(c) { //'connection' listener
 	console.log('client connected');
 	var context = {
-		key: fs.readFileSync('ssl/key.pem'),
-		cert: fs.readFileSync('ssl/cert.pem')
+		key: fs.readFileSync('ssl/server.key'),
+		cert: fs.readFileSync('ssl/server.crt')
 	};
 	c.on('end', function() {
 		console.log('client disconnected');
@@ -59,6 +64,10 @@ var server = net.createServer(function(c) { //'connection' listener
 		} else if (type === 22) {
 			console.log('handshake');
 			var handshake = readHandshake(context, buf);
+
+			// TODO: TLS_FALLBACK_SCSV
+			// inappropriate_fallback alert for TLS/1.1, 1.0
+
 			// console.log(handshake.body);
 			buf = buf.slice(handshake._length);
 			sendServerHello(c, context, handshake.body);
@@ -114,7 +123,7 @@ function readHandshake(context, buf) {
 		body = clientHello;
 		clientHello.cipher_suites.forEach(function(pair) {
 			var name = nameOfCipherSuite(pair);
-			// console.log(name || pair);
+			console.log(name || pair);
 		});
 	} else if (msg_type === 11) {
 		console.log('certificate');
@@ -383,9 +392,9 @@ function createCertificate(c, context) {
 	certificate_list.push(context.cert);
 	return {
 		'ASN.1Cert': certificate_list,
-		_length: 3 + certificate_list.reduce(function(memo, cert) {
+		_length: certificate_list.reduce(function(memo, cert) {
 			return memo + 3 + cert.length;
-		}, 0)
+		}, 3)
 	};
 }
 
@@ -394,6 +403,7 @@ function certificateToBuffer(certificate) {
 		var lengthBuf = b.uint24(cert.length);
 		return Buffer.concat([lengthBuf, cert]);
 	}));
+	console.log(allCertBuf.length);
 	return Buffer.concat([
 		b.uint24(allCertBuf.length),
 		allCertBuf
@@ -521,7 +531,7 @@ function createServerHello(context, clientHello) {
 	var random = createRandom();
 	var session_id = null; //TODO
 	var cipher_suite = chooseCipherSuite(clientHello.cipher_suites);
-	console.log(nameOfCipherSuite(cipher_suite));
+	console.log('select: ' + nameOfCipherSuite(cipher_suite));
 	var compression_method = 0;
 
 	var serverHello = {
@@ -709,28 +719,30 @@ CipherSuites.TLS_DHE_RSA_WITH_CHACHA20_POLY1305_SHA256 = [0xcc, 0x15];
 // "AES128-GCM-SHA256",
 
 var supportedCipherSuites = [
-	CipherSuites.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, //'ECDHE-ECDSA-AES128-GCM-SHA256',
-	CipherSuites.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384, //'ECDHE-RSA-AES256-GCM-SHA384',
-	CipherSuites.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384, //  'ECDHE-ECDSA-AES256-GCM-SHA384',
-	CipherSuites.TLS_DHE_RSA_WITH_AES_128_GCM_SHA256, //  'DHE-RSA-AES128-GCM-SHA256',
-	CipherSuites.TLS_DHE_DSS_WITH_AES_128_GCM_SHA256, // 'DHE-DSS-AES128-GCM-SHA256',
-	CipherSuites.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256, // 'ECDHE-RSA-AES128-SHA256',
+	// CipherSuites.TLS_RSA_WITH_NULL_SHA,
+	//
+	// CipherSuites.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, //'ECDHE-ECDSA-AES128-GCM-SHA256',
+	// CipherSuites.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384, //'ECDHE-RSA-AES256-GCM-SHA384',
+	// CipherSuites.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384, //  'ECDHE-ECDSA-AES256-GCM-SHA384',
+	// CipherSuites.TLS_DHE_RSA_WITH_AES_128_GCM_SHA256, //  'DHE-RSA-AES128-GCM-SHA256',
+	// CipherSuites.TLS_DHE_DSS_WITH_AES_128_GCM_SHA256, // 'DHE-DSS-AES128-GCM-SHA256',
+	// CipherSuites.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256, // 'ECDHE-RSA-AES128-SHA256',
 	CipherSuites.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA, //  'ECDHE-ECDSA-AES128-SHA256',
 	CipherSuites.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA, // 'ECDHE-RSA-AES128-SHA',
-	CipherSuites.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA, // 'ECDHE-ECDSA-AES128-SHA',
-	CipherSuites.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384, // 'ECDHE-RSA-AES256-SHA384',
-	CipherSuites.TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384, // 'ECDHE-ECDSA-AES256-SHA384',
+	// CipherSuites.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA, // 'ECDHE-ECDSA-AES128-SHA',
+	// CipherSuites.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384, // 'ECDHE-RSA-AES256-SHA384',
+	// CipherSuites.TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384, // 'ECDHE-ECDSA-AES256-SHA384',
 	CipherSuites.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA, // 'ECDHE-RSA-AES256-SHA',
-	CipherSuites.TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA, // 'ECDHE-ECDSA-AES256-SHA',
-	CipherSuites.TLS_DHE_RSA_WITH_AES_128_CBC_SHA256, // 'DHE-RSA-AES128-SHA256',
+	// CipherSuites.TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA, // 'ECDHE-ECDSA-AES256-SHA',
+	// CipherSuites.TLS_DHE_RSA_WITH_AES_128_CBC_SHA256, // 'DHE-RSA-AES128-SHA256',
 	CipherSuites.TLS_DHE_RSA_WITH_AES_128_CBC_SHA, // 'DHE-RSA-AES128-SHA',
-	CipherSuites.TLS_DHE_DSS_WITH_AES_128_CBC_SHA256, // 'DHE-DSS-AES128-SHA256',
-	CipherSuites.TLS_DHE_RSA_WITH_AES_256_CBC_SHA256, // 'DHE-RSA-AES256-SHA256',
-	CipherSuites.TLS_DHE_DSS_WITH_AES_256_CBC_SHA, // 'DHE-DSS-AES256-SHA',
+	// CipherSuites.TLS_DHE_DSS_WITH_AES_128_CBC_SHA256, // 'DHE-DSS-AES128-SHA256',
+	// CipherSuites.TLS_DHE_RSA_WITH_AES_256_CBC_SHA256, // 'DHE-RSA-AES256-SHA256',
+	// CipherSuites.TLS_DHE_DSS_WITH_AES_256_CBC_SHA, // 'DHE-DSS-AES256-SHA',
 	CipherSuites.TLS_DHE_RSA_WITH_AES_256_CBC_SHA, // 'DHE-RSA-AES256-SHA',
-	CipherSuites.TLS_RSA_WITH_AES_128_GCM_SHA256, // 'kEDH+AESGCM',
-	CipherSuites.TLS_RSA_WITH_AES_128_GCM_SHA256, // 'AES128-GCM-SHA256',
-	CipherSuites.TLS_RSA_WITH_AES_256_GCM_SHA384, // 'AES256-GCM-SHA384',
+	// CipherSuites.TLS_RSA_WITH_AES_128_GCM_SHA256, // 'kEDH+AESGCM',
+	// CipherSuites.TLS_RSA_WITH_AES_128_GCM_SHA256, // 'AES128-GCM-SHA256',
+	// CipherSuites.TLS_RSA_WITH_AES_256_GCM_SHA384, // 'AES256-GCM-SHA384',
 	CipherSuites.TLS_ECDHE_RSA_WITH_RC4_128_SHA, // 'ECDHE-RSA-RC4-SHA',
 	CipherSuites.TLS_ECDHE_ECDSA_WITH_RC4_128_SHA, // 'ECDHE-ECDSA-RC4-SHA',
 ];

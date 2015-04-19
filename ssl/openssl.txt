@@ -1,3 +1,11 @@
-openssl genrsa -out key.pem 1024
-openssl req -new -key key.pem -out csr.pem
-openssl x509 -req -in csr.pem -signkey key.pem -out cert.pem
+http://x68000.q-e-d.net/~68user/net/ssl-setup-1.html
+
+生成
+openssl genrsa -out server.key 1024
+openssl req -new -key server.key -out csr.pem -sha1
+openssl x509 -in csr.pem -out server.crt -req -signkey server.key -days 365 -sha1
+
+確認
+openssl rsa -in server.key -text -noout
+openssl req -in csr.pem -text -noout
+openssl x509 -in server.crt -text -noout
