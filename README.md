@@ -1,5 +1,5 @@
 # learn-tls
-Just learning TLS using Node.js
+Just for my learning TLS using Node.js
 
 **Caution: This is so far from the correct implementation that you cannot use it.**
 
