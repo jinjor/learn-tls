@@ -1,4 +1,5 @@
 var net = require('net');
+var fs = require('fs');
 var assert = require('assert');
 
 var b = {
@@ -29,12 +30,15 @@ function assertEquals(a, b) {
 
 var server = net.createServer(function(c) { //'connection' listener
 	console.log('client connected');
-	var context = {};
+	var context = {
+		key: fs.readFileSync('ssl/key.pem'),
+		cert: fs.readFileSync('ssl/cert.pem')
+	};
 	c.on('end', function() {
 		console.log('client disconnected');
 	});
 	c.on('data', function(buf) {
-		console.log('---------------');
+		console.log('------------------------------');
 		var type = buf[0];
 		buf = buf.slice(1);
 		var protocolVersion = readProtocolVersion(buf);
@@ -55,9 +59,13 @@ var server = net.createServer(function(c) { //'connection' listener
 		} else if (type === 22) {
 			console.log('handshake');
 			var handshake = readHandshake(context, buf);
-			console.log(handshake.body);
+			// console.log(handshake.body);
 			buf = buf.slice(handshake._length);
 			sendServerHello(c, context, handshake.body);
+			sendCertificate(c, context);
+			// sendServerKeyExchange(c, context);
+			// sendCertificateRequest(c, context);
+			// sendServerHelloDone(c, context);
 		} else if (type === 23) {
 			console.log('application_data');
 		} else {
@@ -114,7 +122,6 @@ function readHandshake(context, buf) {
 		console.log('msg_type = ' + msg_type);
 		//TODO: unexpected_message alert.
 	}
-
 	return {
 		msg_type: msg_type,
 		body: body,
@@ -327,14 +334,72 @@ function readRandom(buf) {
 // } ServerHello;
 function sendServerHello(c, context, clientHello) {
 	var serverHello = createServerHello(context, clientHello);
-
-	var handshake = createHandShake(2, serverHello);
+	var handshake = createHandshake(2, serverHello);
 	var record = createRecord(22, handshake);
-	// console.log(JSON.stringify(record));
 	console.log(record);
-
 	c.write(recordToBuffer(record));
 }
+
+function sendCertificate(c, context) {
+	var certificate = createCertificate(c, context);
+	var handshake = createHandshake(11, certificate);
+	var record = createRecord(22, handshake);
+	console.log(record);
+	c.write(recordToBuffer(record));
+}
+
+function sendServerKeyExchange(c, context) {
+	var serverKeyExchange = createServerKeyExchange(c, context);
+	var handshake = createHandshake(12, serverKeyExchange);
+	var record = createRecord(22, handshake);
+	console.log(record);
+	c.write(recordToBuffer(record));
+}
+
+function sendCertificateRequest(c, context) {
+	var certificate = createCertificateRequest(c, context);
+	var certificateRequest = createHandshake(13, certificateRequest);
+	var record = createRecord(22, handshake);
+	console.log(record);
+	c.write(recordToBuffer(record));
+}
+
+function sendServerHelloDone(c, context) {
+	var serverHelloDone = createServerHelloDone(c, context);
+	var handshake = createHandshake(14, serverHelloDone);
+	var record = createRecord(22, handshake);
+	console.log(record);
+	c.write(recordToBuffer(record));
+}
+
+
+// opaque ASN.1Cert<1..2^24-1>;
+
+// struct {
+//     ASN.1Cert certificate_list<0..2^24-1>;
+// } Certificate;
+function createCertificate(c, context) {
+	var certificate_list = [];
+	certificate_list.push(context.cert);
+	return {
+		'ASN.1Cert': certificate_list,
+		_length: 3 + certificate_list.reduce(function(memo, cert) {
+			return memo + 3 + cert.length;
+		}, 0)
+	};
+}
+
+function certificateToBuffer(certificate) {
+	var allCertBuf = Buffer.concat(certificate['ASN.1Cert'].map(function(cert) {
+		var lengthBuf = b.uint24(cert.length);
+		return Buffer.concat([lengthBuf, cert]);
+	}));
+	return Buffer.concat([
+		b.uint24(allCertBuf.length),
+		allCertBuf
+	]);
+}
+
 
 
 function recordToBuffer(record) {
@@ -376,6 +441,14 @@ function handshakeToBuffer(handshake) {
 	var bodyBuf;
 	if (handshake.msg_type === 2) {
 		bodyBuf = serverHelloToBuffer(handshake.body);
+	} else if (handshake.msg_type === 11) {
+		bodyBuf = certificateToBuffer(handshake.body);
+	} else if (handshake.msg_type === 12) {
+		bodyBuf = serverKeyExchangeToBuffer(handshake.body);
+	} else if (handshake.msg_type === 13) {
+		bodyBuf = certificateRequestToBuffer(handshake.body);
+	} else if (handshake.msg_type === 14) {
+		bodyBuf = serverHelloDoneToBuffer(handshake.body);
 	} else {
 		assert(false);
 	}
@@ -405,7 +478,7 @@ function serverHelloToBuffer(serverHello) {
 	var serverHelloBuffer = Buffer.concat([
 		new Buffer([serverHello.server_version.major, serverHello.server_version.minor]),
 		Buffer.concat([b.uint32(serverHello.random.gmt_unix_time), serverHello.random.random_bytes]),
-		Buffer.concat([b.uint16(1), new Buffer([50])]), //TODO
+		Buffer.concat([new Buffer([1]), new Buffer([50])]), //TODO
 		new Buffer(serverHello.cipher_suite),
 		new Buffer([serverHello.compression_method])
 	]);
@@ -432,14 +505,14 @@ function createRecord(type, fragment) {
 	};
 }
 
-function createHandShake(msg_type, body) {
-	var handShake = {
+function createHandshake(msg_type, body) {
+	var handshake = {
 		msg_type: msg_type,
 		length: body._length, // uint24
 		body: body,
 		_length: 1 + 3 + body._length
 	};
-	return handShake;
+	return handshake;
 }
 
 
@@ -457,7 +530,7 @@ function createServerHello(context, clientHello) {
 		session_id: session_id,
 		cipher_suite: cipher_suite,
 		compression_method: compression_method,
-		_length: 2 + 32 + (2 + 1) + 2 + 1
+		_length: 2 + 32 + (1 + 1) + 2 + 1
 	};
 	return serverHello;
 }
