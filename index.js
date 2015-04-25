@@ -511,7 +511,7 @@ function createServerKeyExchange(c, context, clientHello, serverHello) {
     console.log('HERE');
     // https://tools.ietf.org/html/rfc4492
     ret.params = createServerECDHParams(context);
-		var sha_hash = new Buffer(1024); //TODO
+		var sha_hash = new Buffer(256); //TODO
     ret.signed_params = toDigitallySigned(sha_hash, keyExchangeAlgorithm);
     console.log(ret);
   } else {
