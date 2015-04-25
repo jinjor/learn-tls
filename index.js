@@ -1,6 +1,7 @@
 var net = require('net');
 var fs = require('fs');
 var assert = require('assert');
+var crypto = require('crypto');
 
 var b = {
   uint8: function(num) {
@@ -476,17 +477,15 @@ function createServerKeyExchange(c, context, clientHello, serverHello) {
     keyExchangeAlgorithm = 'ec_diffie_hellman';
   }
 
+	console.log('keyExchangeAlgorithm = ' + keyExchangeAlgorithm);
+
   var ret = {
     keyExchangeAlgorithm: keyExchangeAlgorithm // won't be serialized
   };
   if (keyExchangeAlgorithm === 'dhe_dss' || keyExchangeAlgorithm === 'ecdhe_ecdsa') {
     ret = null;
   } else if (keyExchangeAlgorithm === 'dhe_rsa' || keyExchangeAlgorithm === 'ecdhe_rsa') {
-    ret.params = {
-      dh_p: b.uint16(53), //1..2^16-1
-      dh_g: b.uint16(2), //1..2^16-1
-      dh_Ys: b.uint16(35) //1..2^16-1
-    };
+    ret.params = createServerDHParams();
     var signed_paramsInputBuf = Buffer.concat([
       randomToBuffer(clientHello.random),
       randomToBuffer(serverHello.random),
@@ -496,11 +495,7 @@ function createServerKeyExchange(c, context, clientHello, serverHello) {
     ]);
     ret.signed_params = toDigitallySigned(signed_paramsInputBuf, keyExchangeAlgorithm);
   } else if (keyExchangeAlgorithm === 'dh_anon' || keyExchangeAlgorithm === 'ecdh_anon') {
-    ret.params = {
-      dh_p: b.uint16(53), //1..2^16-1
-      dh_g: b.uint16(2), //1..2^16-1
-      dh_Ys: b.uint16(35) //1..2^16-1
-    };
+    ret.params = createServerDHParams();
   } else if (keyExchangeAlgorithm === 'rsa') {
     ret = null;
   } else if (keyExchangeAlgorithm === 'dh_dss' || keyExchangeAlgorithm === 'ecdh_ecdsa') {
@@ -513,11 +508,28 @@ function createServerKeyExchange(c, context, clientHello, serverHello) {
     ret.params = createServerECDHParams(context);
 		var sha_hash = new Buffer(256); //TODO
     ret.signed_params = toDigitallySigned(sha_hash, keyExchangeAlgorithm);
-    console.log(ret);
+    // console.log(ret);
   } else {
     assert(false);
   }
   return ret;
+}
+
+
+// struct {
+// 		opaque dh_p<1..2^16-1>;
+// 		opaque dh_g<1..2^16-1>;
+// 		opaque dh_Ys<1..2^16-1>;
+// } ServerDHParams;     /* Ephemeral DH parameters */
+function createServerDHParams() {
+	// https://nodejs.org/api/crypto.html#crypto_class_diffiehellman
+	var alice = crypto.getDiffieHellman('modp5');
+	alice.generateKeys();
+	return {
+		dh_p: alice.getPrime(),
+		dh_g: alice.getGenerator(),
+		dh_Ys: alice.getPrivateKey()
+	};
 }
 
 
@@ -568,13 +580,13 @@ function toDigitallySigned(input, keyExchangeAlgorithm) {
   if (algorithm.hash === 2) {
 
   } else {
-    assert(false);
+    // assert(false);
   }
 
   if (algorithm.signature === 3) {
     signature = signature;
   } else {
-    assert(false);
+    // assert(false);
   }
 
   return {
@@ -640,14 +652,18 @@ function serverKeyExchangeToBuffer(serverKeyExchange) {
   var bufs = [];
   if (serverKeyExchange.keyExchangeAlgorithm === 'ec_diffie_hellman') {
     if (serverKeyExchange.params) {
-      // TODO: condition ServerDHParams/ServerECDHParams
       bufs.push(serverECDHParamsToBuffer(serverKeyExchange.params));
     }
     if (serverKeyExchange.signed_params) {
       bufs.push(serverKeyExchangeSignedParamsToBuffer(serverKeyExchange.signed_params));
     }
   } else {
-    assert(false);
+		if (serverKeyExchange.params) {
+      bufs.push(serverDHParamsToBuffer(serverKeyExchange.params));
+    }
+    if (serverKeyExchange.signed_params) {
+      bufs.push(serverKeyExchangeSignedParamsToBuffer(serverKeyExchange.signed_params));
+    }
   }
 
   // console.log();
@@ -1046,7 +1062,7 @@ CipherSuites.TLS_DHE_RSA_WITH_CHACHA20_POLY1305_SHA256 = [0xcc, 0x15];
 // "AES128-GCM-SHA256",
 
 var supportedCipherSuites = [
-  CipherSuites.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256, //Firefox
+  // CipherSuites.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256, // required by HTTP/2
   //
   // CipherSuites.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, //'ECDHE-ECDSA-AES128-GCM-SHA256',
   // CipherSuites.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384, //'ECDHE-RSA-AES256-GCM-SHA384',
@@ -1054,12 +1070,12 @@ var supportedCipherSuites = [
   // CipherSuites.TLS_DHE_RSA_WITH_AES_128_GCM_SHA256, //  'DHE-RSA-AES128-GCM-SHA256',
   // CipherSuites.TLS_DHE_DSS_WITH_AES_128_GCM_SHA256, // 'DHE-DSS-AES128-GCM-SHA256',
   // CipherSuites.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256, // 'ECDHE-RSA-AES128-SHA256',
-  CipherSuites.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA, //  'ECDHE-ECDSA-AES128-SHA256',
-  CipherSuites.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA, // 'ECDHE-RSA-AES128-SHA',
+  // CipherSuites.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA, //  'ECDHE-ECDSA-AES128-SHA256',
+  // CipherSuites.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA, // 'ECDHE-RSA-AES128-SHA',
   // CipherSuites.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA, // 'ECDHE-ECDSA-AES128-SHA',
   // CipherSuites.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384, // 'ECDHE-RSA-AES256-SHA384',
   // CipherSuites.TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384, // 'ECDHE-ECDSA-AES256-SHA384',
-  CipherSuites.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA, // 'ECDHE-RSA-AES256-SHA',
+  // CipherSuites.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA, // 'ECDHE-RSA-AES256-SHA',
   // CipherSuites.TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA, // 'ECDHE-ECDSA-AES256-SHA',
   // CipherSuites.TLS_DHE_RSA_WITH_AES_128_CBC_SHA256, // 'DHE-RSA-AES128-SHA256',
   CipherSuites.TLS_DHE_RSA_WITH_AES_128_CBC_SHA, // 'DHE-RSA-AES128-SHA',
@@ -1070,8 +1086,8 @@ var supportedCipherSuites = [
   // CipherSuites.TLS_RSA_WITH_AES_128_GCM_SHA256, // 'kEDH+AESGCM',
   // CipherSuites.TLS_RSA_WITH_AES_128_GCM_SHA256, // 'AES128-GCM-SHA256',
   // CipherSuites.TLS_RSA_WITH_AES_256_GCM_SHA384, // 'AES256-GCM-SHA384',
-  CipherSuites.TLS_ECDHE_RSA_WITH_RC4_128_SHA, // 'ECDHE-RSA-RC4-SHA',
-  CipherSuites.TLS_ECDHE_ECDSA_WITH_RC4_128_SHA, // 'ECDHE-ECDSA-RC4-SHA',
+  // CipherSuites.TLS_ECDHE_RSA_WITH_RC4_128_SHA, // 'ECDHE-RSA-RC4-SHA',
+  // CipherSuites.TLS_ECDHE_ECDSA_WITH_RC4_128_SHA, // 'ECDHE-ECDSA-RC4-SHA',
 
 ];
 
