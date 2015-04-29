@@ -34,69 +34,154 @@ function assertEquals(a, b) {
 }
 
 
-var server = net.createServer(function(c) { //'connection' listener
+var server = net.createServer(function(socket) { //'connection' listener
   console.log('client connected');
   var context = {
     key: fs.readFileSync('ssl/server.key'),
     cert: fs.readFileSync('ssl/server.crt')
   };
-  c.on('end', function() {
+  socket.on('end', function() {
     console.log('client disconnected');
   });
-  c.on('data', function(buf) {
+  socket.on('data', function(buf) {
     console.log('------------------------------');
-    var type = buf[0];
-    buf = buf.slice(1);
-    var protocolVersion = readProtocolVersion(buf);
-    buf = buf.slice(protocolVersion._length);
-    var length = buf.readUInt16BE();
-    buf = buf.slice(2);
-    console.log(protocolVersion);
-    // if(protocolVersion.minor !== 3) {
-    // 	return;
-    // }
+    var f = function() {
+      var record = readRecord(context, buf);
+      buf = buf.slice(record._length);
+      processRecord(socket, context, record, function() {
+        if(buf.length > 0) {
+          f();
+        }
+      });
+    };
+    f();
 
-    if (type === 20) {
-      console.log('change_cipher_spec');
-    } else if (type === 21) {
-      console.log('alert');
-      var alert = readAlert(context, buf);
-      console.log(alert);
-    } else if (type === 22) {
-      console.log('handshake');
-      var handshake = readHandshake(context, buf);
-      console.log(handshake);
-
-      // TODO: TLS_FALLBACK_SCSV
-      // inappropriate_fallback alert for TLS/1.1, 1.0
-
-      // console.log(handshake.body);
-      buf = buf.slice(handshake._length);
-      var clientHello = handshake.body;
-      var serverHello = sendServerHello(c, context, clientHello);
-      sendCertificate(c, context);
-      sendServerKeyExchange(c, context, clientHello, serverHello);
-      // sendCertificateRequest(c, context);
-      // sendServerHelloDone(c, context);
-    } else if (type === 23) {
-      console.log('application_data');
-    } else {
-      console.log('?');
-    }
-
-    // c.write('HTTP/1.1 200 OK\r\n');
-    // // c.write('Connection: close\r\n');
-    // c.write('\r\n');
-    // c.write('hello\r\n');
-    // c.end();
   });
-  // c.end();
+
 
 });
 
 server.listen(8080, function() {
   console.log('server bound');
 });
+
+
+function processRecord(socket, context, record, done) {
+  var buf = record.fragment;
+  if (record.type === 20) {
+    context.changeCipherSpec = record.fragment;
+  } else if (record.type === 21) {
+    var alert = record.fragment;
+    processAlert(socket, context, alert);
+  } else if (record.type === 22) {
+    var handshake = record.fragment;
+    processHandshake(socket, context, handshake);
+  } else {
+    assert(false);
+  }
+  done();
+
+}
+
+function processAlert(socket, context, alert) {
+  console.log(alert);
+}
+
+function processHandshake(socket, context, handshake) {
+
+  if(handshake.msg_type === 16) {
+    // second
+    context.clientKeyExchange = handshake.body;
+
+  } else {
+    // first
+    var clientHello = handshake.body;
+    var serverHello = sendServerHello(socket, context, clientHello);
+    sendCertificate(socket, context);
+    sendServerKeyExchange(socket, context, clientHello, serverHello);
+    // sendCertificateRequest(c, context);
+    sendServerHelloDone(socket, context);
+  }
+
+
+}
+
+
+// struct {
+//     ContentType type;
+//     ProtocolVersion version;
+//     uint16 length;
+//     select (SecurityParameters.cipher_type) {
+//         case stream: GenericStreamCipher;
+//         case block:  GenericBlockCipher;
+//         case aead:   GenericAEADCipher;
+//     } fragment;
+// } TLSCiphertext;
+
+
+// struct {
+//     ContentType type;
+//     ProtocolVersion version;
+//     uint16 length;
+//     opaque fragment[TLSPlaintext.length];
+// } TLSPlaintext;
+function readRecord(context, buf) {
+
+  var type = buf[0];
+  buf = buf.slice(1);
+  var protocolVersion = readProtocolVersion(buf);
+  console.log(protocolVersion);
+  buf = buf.slice(protocolVersion._length);
+  var length = buf.readUInt16BE();
+  buf = buf.slice(2);
+  var fragment;
+
+  if(context.changeCipherSpec) {
+    // context.changeCipherSpec.random;
+    // buf =
+  }
+
+
+  if (type === 20) {
+    console.log('change_cipher_spec');
+    console.log(length);
+    fragment = readChangeCipherSpec(context, buf);
+  } else if (type === 21) {
+    console.log('alert');
+    fragment = readAlert(context, buf);
+  } else if (type === 22) {
+    console.log('handshake');
+    fragment = readHandshake(context, buf);
+  } else if (type === 23) {
+    console.log('application_data');
+    assert(false);
+  } else {
+    console.log('?');
+    assert(false);
+  }
+
+  return {
+    type: type,
+    version: protocolVersion,
+    length: length,
+    fragment: fragment,
+    _length: 1 + protocolVersion._length + 2 + length
+  };
+}
+
+
+
+
+
+function readChangeCipherSpec(context, buf) {
+  return {
+    type: buf[0],
+    _length: 1
+  };
+}
+
+
+
 
 // struct {
 //   HandshakeType msg_type;    /* handshake type */
@@ -115,7 +200,7 @@ server.listen(8080, function() {
 //   } body;
 // } Handshake;
 function readHandshake(context, buf) {
-  var msg_type = buf[0];
+  var msg_type = buf.readUInt8();
   var length = buf.readUInt32BE(1) >> 8;
   // console.log(msg_type, length);
   buf = buf.slice(4);
@@ -125,8 +210,9 @@ function readHandshake(context, buf) {
     assert(false); // not implemented
   } else if (msg_type === 1) {
     console.log('ClientHello');
-    var clientHello = readClientHello(buf, length);
+    var clientHello = readClientHello(buf);
     console.log(clientHello.client_version);
+
     logExtensions(clientHello.extensions);
     body = clientHello;
     clientHello.cipher_suites.forEach(function(pair) {
@@ -135,14 +221,23 @@ function readHandshake(context, buf) {
     });
   } else if (msg_type === 11) {
     console.log('certificate');
+    assert(false);
+  } else if (msg_type === 16) {
+    console.log('client_key_exchange');
+    body = readClientKeyExchange(context, buf);
+  } else if (msg_type === 20) {
+    console.log('finished');
+    assert(false);
   } else {
-    console.log('msg_type = ' + msg_type);
+    console.log('msg_type=' + msg_type);
+    console.log('length=' + length);
+    assert(false);
     //TODO: unexpected_message alert.
   }
   return {
     msg_type: msg_type,
     body: body,
-    // _length: length
+    _length: length
   };
 }
 
@@ -173,7 +268,7 @@ function readAlert(context, buf) {
 //             Extension extensions<0..2^16-1>;
 //     };
 // } ClientHello;
-function readClientHello(buf, length) {
+function readClientHello(buf) {
   var client_version = readProtocolVersion(buf);
   buf = buf.slice(client_version._length);
   var random = readRandom(buf);
@@ -210,6 +305,60 @@ function readClientHello(buf, length) {
     extensions: extensions
   };
 }
+
+
+// struct {
+//     select (KeyExchangeAlgorithm) {
+//         case rsa:
+//             EncryptedPreMasterSecret;
+//         case dhe_dss:
+//         case dhe_rsa:
+//         case dh_dss:
+//         case dh_rsa:
+//         case dh_anon:
+//             ClientDiffieHellmanPublic;
+//     } exchange_keys;
+// } ClientKeyExchange;
+function readClientKeyExchange(context, buf, keyExchangeAlgorithm) {
+
+  // assume rsa
+  return readEncryptedPreMasterSecret(context, buf);
+}
+
+
+// struct {
+//     ProtocolVersion client_version;
+//     opaque random[46];
+// } PreMasterSecret;
+// struct {
+//     public-key-encrypted PreMasterSecret pre_master_secret;
+// } EncryptedPreMasterSecret;
+
+function readEncryptedPreMasterSecret(context, pre_master_secret) {
+  var length = pre_master_secret.readUInt16BE();
+  var buf = pre_master_secret.slice(2);
+  input = buf.slice(0, length);
+  var buf = decryptPreMasterSecret(input);
+
+  var client_version = readProtocolVersion(buf);
+  buf = buf.slice(client_version._length);
+  var random = buf;
+  assert(random.length === 46);
+  return {
+    client_version: client_version,
+    random: random,
+    _length: 2 + length
+  };
+}
+
+
+function decryptPreMasterSecret(input) {
+  fs.writeFileSync('ssl/tmp', input);
+  var buffer = require('child_process').execSync('cat ssl/tmp | openssl rsautl -decrypt -inkey ssl/server.key');
+  return buffer;
+}
+
+
 
 // http://www.iana.org/assignments/tls-extensiontype-values/tls-extensiontype-values.xhtml
 // 0	server_name	[RFC6066]
@@ -337,19 +486,14 @@ function readRandom(buf) {
   };
 }
 
-// struct {
-//   ProtocolVersion server_version;
-//   Random random;
-//   SessionID session_id;
-//   CipherSuite cipher_suite;
-//   CompressionMethod compression_method;
-//   select (extensions_present) {
-//       case false:
-//           struct {};
-//       case true:
-//           Extension extensions<0..2^16-1>;
-//   };
-// } ServerHello;
+
+function sendChangeCipherSpec(c, context) {
+  var changeCipherSpec = new Buffer([1]);
+  var record = createRecord(20, changeCipherSpec);
+  console.log(record);
+  c.write(recordToBuffer(record));
+}
+
 function sendServerHello(c, context, clientHello) {
   var serverHello = createServerHello(context, clientHello);
   var handshake = createHandshake(2, serverHello);
@@ -394,9 +538,13 @@ function sendServerHelloDone(c, context) {
   c.write(recordToBuffer(record));
 }
 
+
+
 function decodePem(pemBuf) {
   var pemStr = pemBuf.toString();
   // console.log(pemStr);
+  // return pemBuf;
+
   var content = pemStr.split('-----BEGIN CERTIFICATE-----')[1]
     .split('-----END CERTIFICATE-----')[0]
     .split('\r').join()
@@ -766,6 +914,12 @@ function recordToBuffer(record) {
   ]);
 }
 
+
+
+
+
+
+
 // struct {
 //   HandshakeType msg_type;    /* handshake type */
 //   uint24 length;             /* bytes in message */
@@ -804,6 +958,17 @@ function handshakeToBuffer(handshake) {
     bodyBuf
   ]);
 }
+
+
+function createServerHelloDone() {
+  return {};
+}
+
+function serverHelloDoneToBuffer(serverHelloDone) {
+  return new Buffer(0);
+}
+
+
 
 
 // struct {
@@ -866,7 +1031,19 @@ function createHandshake(msg_type, body) {
   return handshake;
 }
 
-
+// struct {
+//   ProtocolVersion server_version;
+//   Random random;
+//   SessionID session_id;
+//   CipherSuite cipher_suite;
+//   CompressionMethod compression_method;
+//   select (extensions_present) {
+//       case false:
+//           struct {};
+//       case true:
+//           Extension extensions<0..2^16-1>;
+//   };
+// } ServerHello;
 function createServerHello(context, clientHello) {
   var server_version = clientHello.client_version; // support highest
   var random = createRandom();
@@ -1078,11 +1255,11 @@ var supportedCipherSuites = [
   // CipherSuites.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA, // 'ECDHE-RSA-AES256-SHA',
   // CipherSuites.TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA, // 'ECDHE-ECDSA-AES256-SHA',
   // CipherSuites.TLS_DHE_RSA_WITH_AES_128_CBC_SHA256, // 'DHE-RSA-AES128-SHA256',
-  CipherSuites.TLS_DHE_RSA_WITH_AES_128_CBC_SHA, // 'DHE-RSA-AES128-SHA',
+  // CipherSuites.TLS_DHE_RSA_WITH_AES_128_CBC_SHA, // 'DHE-RSA-AES128-SHA',
   // CipherSuites.TLS_DHE_DSS_WITH_AES_128_CBC_SHA256, // 'DHE-DSS-AES128-SHA256',
   // CipherSuites.TLS_DHE_RSA_WITH_AES_256_CBC_SHA256, // 'DHE-RSA-AES256-SHA256',
   // CipherSuites.TLS_DHE_DSS_WITH_AES_256_CBC_SHA, // 'DHE-DSS-AES256-SHA',
-  CipherSuites.TLS_DHE_RSA_WITH_AES_256_CBC_SHA, // 'DHE-RSA-AES256-SHA',
+  CipherSuites.TLS_RSA_WITH_AES_256_CBC_SHA, // 'DHE-RSA-AES256-SHA',
   // CipherSuites.TLS_RSA_WITH_AES_128_GCM_SHA256, // 'kEDH+AESGCM',
   // CipherSuites.TLS_RSA_WITH_AES_128_GCM_SHA256, // 'AES128-GCM-SHA256',
   // CipherSuites.TLS_RSA_WITH_AES_256_GCM_SHA384, // 'AES256-GCM-SHA384',

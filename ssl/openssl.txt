@@ -3,7 +3,7 @@ http://trycatchand.blogspot.jp/2014/01/how-to-make-a-self-signed-certificate-and
 http://nodejs.jp/nodejs.org_ja/docs/v0.4/api/tls.html
 
 生成
-openssl genrsa -out server.key 1024
+openssl genrsa -out server.key 2048 -aes-256-cbc
 openssl req -new -key server.key -out csr.pem
 openssl x509 -req -in csr.pem -signkey server.key -out server.crt
 
