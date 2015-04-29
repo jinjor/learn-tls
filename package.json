@@ -4,11 +4,14 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "babel index.js > build.js",
+    "start": "npm run build && node build"
   },
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "asn1": "^0.2.2"
+    "asn1": "^0.2.2",
+    "babel": "^5.1.13"
   }
 }
