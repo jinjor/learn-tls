@@ -1,3 +1,4 @@
+require('source-map-support').install();
 var net = require('net');
 var fs = require('fs');
 var assert = require('assert');
@@ -46,8 +47,8 @@ var server = net.createServer(function(socket) { //'connection' listener
   socket.on('data', function(buf) {
     console.log('------------------------------');
     var f = function() {
-      var record = readRecord(context, buf);
-      buf = buf.slice(record._length);
+      var record;
+      [record, buf] = readRecord(context, buf);
       processRecord(socket, context, record, function() {
         if(buf.length > 0) {
           f();
@@ -129,9 +130,8 @@ function readRecord(context, buf) {
 
   var type = buf[0];
   buf = buf.slice(1);
-  var protocolVersion = readProtocolVersion(buf);
+  var [protocolVersion, buf] = readProtocolVersion(buf);
   console.log(protocolVersion);
-  buf = buf.slice(protocolVersion._length);
   var length = buf.readUInt16BE();
   buf = buf.slice(2);
   var fragment;
@@ -141,17 +141,16 @@ function readRecord(context, buf) {
     // buf =
   }
 
-
   if (type === 20) {
     console.log('change_cipher_spec');
     console.log(length);
-    fragment = readChangeCipherSpec(context, buf);
+    [fragment, buf] = readChangeCipherSpec(context, buf);
   } else if (type === 21) {
     console.log('alert');
-    fragment = readAlert(context, buf);
+    [fragment, buf] = readAlert(context, buf);
   } else if (type === 22) {
     console.log('handshake');
-    fragment = readHandshake(context, buf);
+    [fragment, buf] = readHandshake(context, buf);
   } else if (type === 23) {
     console.log('application_data');
     assert(false);
@@ -160,13 +159,12 @@ function readRecord(context, buf) {
     assert(false);
   }
 
-  return {
+  return [{
     type: type,
     version: protocolVersion,
     length: length,
-    fragment: fragment,
-    _length: 1 + protocolVersion._length + 2 + length
-  };
+    fragment: fragment
+  }, buf];
 }
 
 
@@ -174,10 +172,10 @@ function readRecord(context, buf) {
 
 
 function readChangeCipherSpec(context, buf) {
-  return {
+  return [{
     type: buf[0],
     _length: 1
-  };
+  }, buf.slice(1)];
 }
 
 
@@ -234,11 +232,11 @@ function readHandshake(context, buf) {
     assert(false);
     //TODO: unexpected_message alert.
   }
-  return {
+  return [{
     msg_type: msg_type,
     body: body,
     _length: length
-  };
+  }, buf.slice(length)];
 }
 
 
@@ -247,11 +245,10 @@ function readHandshake(context, buf) {
 //     AlertDescription description;
 // } Alert;
 function readAlert(context, buf) {
-  var alert = {
+  return [{
     level: buf[0],
     description: buf[1]
-  };
-  return alert;
+  }, buf.slice(2)];
 }
 
 
@@ -269,10 +266,8 @@ function readAlert(context, buf) {
 //     };
 // } ClientHello;
 function readClientHello(buf) {
-  var client_version = readProtocolVersion(buf);
-  buf = buf.slice(client_version._length);
-  var random = readRandom(buf);
-  buf = buf.slice(random._length);
+  var [client_version, buf] = readProtocolVersion(buf);
+  var [random, buf] = readRandom(buf);
   var sessionIdLength = buf[0];
   var session_id;
   if (sessionIdLength) {
@@ -337,11 +332,10 @@ function readClientKeyExchange(context, buf, keyExchangeAlgorithm) {
 function readEncryptedPreMasterSecret(context, pre_master_secret) {
   var length = pre_master_secret.readUInt16BE();
   var buf = pre_master_secret.slice(2);
-  input = buf.slice(0, length);
+  var input = buf.slice(0, length);
   var buf = decryptPreMasterSecret(input);
 
-  var client_version = readProtocolVersion(buf);
-  buf = buf.slice(client_version._length);
+  var [client_version, buf] = readProtocolVersion(buf);
   var random = buf;
   assert(random.length === 46);
   return {
@@ -479,11 +473,11 @@ function readRandom(buf) {
   var gmt_unix_time = buf.readUInt32BE();
   // console.log(new Date(gmt_unix_time * 1000));
   var random_bytes = buf.slice(4, 32);
-  return {
+  return [{
     gmt_unix_time: gmt_unix_time,
     random_bytes: random_bytes,
     _length: 32
-  };
+  }, buf.slice(32)];
 }
 
 
@@ -903,9 +897,6 @@ function recordToBuffer(record) {
   } else {
     assert(false);
   }
-  // console.log(record);
-  // console.log(record.fragment._length, fragmentBuf.length);
-  // assertEquals(record.fragment._length, fragmentBuf.length);
   return Buffer.concat([
     new Buffer([record.type]),
     new Buffer([record.version.major, record.version.minor]),
@@ -992,7 +983,6 @@ function serverHelloToBuffer(serverHello) {
     new Buffer(serverHello.cipher_suite),
     new Buffer([serverHello.compression_method])
   ]);
-  // assertEquals(serverHello._length, serverHelloBuffer.length);
   return serverHelloBuffer;
 }
 
@@ -1016,7 +1006,6 @@ function createRecord(type, fragment) {
       major: 3,
       minor: 3
     },
-    // length: fragment._length,
     fragment: fragment
   };
 }
@@ -1024,9 +1013,7 @@ function createRecord(type, fragment) {
 function createHandshake(msg_type, body) {
   var handshake = {
     msg_type: msg_type,
-    // length: body._length, // uint24
     body: body,
-    // _length: 1 + 3 + body._length
   };
   return handshake;
 }
@@ -1081,11 +1068,10 @@ function createRandom() {
 //   uint8 minor;
 // } ProtocolVersion;
 function readProtocolVersion(buf) {
-  return {
+  return [{
     major: buf.readUInt8(0),
-    minor: buf.readUInt8(1),
-    _length: 2
-  };
+    minor: buf.readUInt8(1)
+  }, buf.slice(2)];
 }
 
 
